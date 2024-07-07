@@ -1,0 +1,4 @@
+/bazel-*
+*~
+*.pro
+moteus_control_example

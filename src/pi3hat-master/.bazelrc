@@ -1,0 +1,43 @@
+build --compiler=compiler
+test --compiler=compiler
+
+build --cpu=stm32g4
+test --cpu=stm32g4
+
+build --crosstool_top=@com_github_mjbots_rules_mbed//tools/cc_toolchain:toolchain
+test --crosstool_top=@com_github_mjbots_rules_mbed//tools/cc_toolchain:toolchain
+
+build --nostart_end_lib
+test --nostart_end_lib
+
+build -c opt
+test -c opt
+
+build:pi --cpu=armeabihf
+test:pi --cpu=armeabihf
+
+build:pi --crosstool_top=@rpi_bazel//tools/cc_toolchain:toolchain
+test:pi --crosstool_top=@rpi_bazel//tools/cc_toolchain:toolchain
+
+build:pi --compiler=clang
+test:pi --compiler=clang
+
+build:pi64 --cpu=aarch64
+test:pi64 --cpu=aarch64
+
+build:pi64 --crosstool_top=@rpi_bazel//tools/cc_toolchain:toolchain
+test:pi64 --crosstool_top=@rpi_bazel//tools/cc_toolchain:toolchain
+
+build:pi64 --compiler=clang
+test:pi64 --compiler=clang
+
+build:host --compiler=compiler
+build:host --cpu=k8
+
+build --workspace_status_command=tools/workspace_status.sh
+test --workspace_status_command=tools/workspace_status.sh
+
+build --stamp
+test --stamp
+
+test --test_output=errors

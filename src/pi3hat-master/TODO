@@ -1,0 +1,111 @@
+ * Support configuring CAN devices
+ * Report CAN state and error flags
+
+ * In one instance, saw the CAN stm32 get hung in some way that caused
+   _tool -r to run very slow and use the timeout, despite single
+   instance appearing to get all the responses
+
+ * add "stored procedure" sends, so that all the queries to all
+   servos, for instance can be sent with a 1 byte SPI command.
+
+DONE 2020-11-17
+ * Switched regulator to MAX17504
+   * changed inductor to meet its guidelines
+ * Removed microphone
+ * Added connector with 3V and 5V power
+ * Added VIN sense resistor connected to aux processor
+
+DONE 2020-06-12
+ * Implemented DMA
+ * Troubleshooted timing irregularities
+
+DONE 2020-06-11
+ * Tested on full 4 buses
+
+DONE 2020-06-10
+ * Got RF working in a basic way
+ * Implemented many features
+
+DONE 2020-06-09
+ * r4.2 bringup
+   * Switching to optimized protocol and resolving all TODOs
+
+DONE 2020-04-23
+ * r4.1 bringup
+   * Verified primary CAN, IMU, and NRF
+   * Verified aux CAN
+   * Verified IRQ lines
+   * Microphone
+
+DONE 2020-03-28
+ * Implemented NRF protocol
+
+DONE 2020-03-22
+ * r4.1
+   * Switched out aux CAN for the LTC2875 to get better common mode
+   * Stopped populating NRF header
+   * get the pi header into PCBA (so mirror all the pins and flip it to
+     the bottom of the board)
+   * Connect some pins from each uc to GPIOs on the rpi for IRQ or other
+     general purpose
+   * expose some random STM32 pins, especially on the AUX STM32 on pin
+     headers w/ gnd
+   * expose some random pi GPIOs on pin headers w/ gnd
+   * added microphone to aux processor
+ * NRF
+   * add a solid ground fill under the board on the top layer, maybe
+     with a few mounting holes to add more support hw
+   * add more filtering to NRF power supply... perhaps a LC filter of
+     some sort and a bigger decoupling cap
+   * think harder about NRF antenna placement options, turning it
+     around to face the other side of the board would allow the
+     antenna to be away from all the other cables, but soldering
+     directly to the board could interfere with other connectors
+
+DONE 2020-03-04
+ * Implemented accelerometer rejection for dynamic maneuvers
+ * Implemented a term to keep the yaw bias uncertainty in check
+ * Tuned constants a tiny bit
+ * Diagnosed SPI timing problem and improved things
+
+DONE 2020-03-03
+ * Implemented AHRS
+
+DONE 2020-03-01
+ * got eeprom settings into git
+ * Verified NRF works
+
+DONE 2020-02-29
+ * Verified IMU works
+
+DONE 2020-02-28
+ * add mjbots logo
+ * Add debug pads to each processor
+
+DONE 2020-01-29
+ * route power
+ * route SPI
+ * route CAN
+ * selected parts
+ * route everything else
+ * fine fix silks
+
+DONE 2020-01-28
+ * Fixed up stm32 pinouts
+ * renumber caps
+ * renumber resistors
+ * renumber diodes
+ * add overvoltage protection tvs
+ * fine place all components
+ * rough silks
+ * route planes
+
+r3 DONE
+ * Added pullup to RT8299 EN
+
+r2 ERRATA
+ * RT8299 EN needs a 100k pullup to VIN
+
+# r1 #
+
+* R1 is 10.5k instead of 105k
