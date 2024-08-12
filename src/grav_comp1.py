@@ -1,14 +1,19 @@
 import asyncio
 import math
 import moteus
+import moteus_pi3hat
 
 MASS_KG = 0.26  # Actual value is 0.3 kg
-LINK_LENGTH = 0.2  # in meters
+LINK_LENGTH = 0.15  # in meters
 GRAVITY = 9.8  # m/s^2
 
 async def main():
-    transport = moteus.Fdcanusb()
-    c = moteus.Controller(id=1)  # Assuming we're using just one controller
+    transport = moteus_pi3hat.Pi3HatRouter(
+        servo_bus_map={
+            1: [1],  # Assuming controller ID 1 is on bus 1
+        }
+    )
+    c = moteus.Controller(id=1, transport=transport)
 
     # Configure the position mode command
     cmd = moteus.Controller.make_position(
@@ -26,8 +31,8 @@ async def main():
 
     while True:
         try:
-            result = await transport.cycle([c.make_position(**cmd)])
-            state = result[0][1]  # Assuming single controller response
+            result = await c.set_position(**cmd)
+            state = result.values
 
             # Calculate gravity compensation torque
             position = state.position

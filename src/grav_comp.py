@@ -1,69 +1,95 @@
+import pinocchio as pin
+import numpy as np
+from sys import argv
+
 import asyncio
 import math
 import moteus
 import moteus_pi3hat
+import time
 
-MASS_KG = 0.26  # Actual value is 0.3 kg
-LINK_LENGTH = 0.15  # in meters
-GRAVITY = 9.8  # m/s^2
+def inverse_kinematic(q, v, a):
+  # Evaluate the derivatives
+  pin.computeABADerivatives(model,data,q,v,a)
+
+  # Retrieve the derivatives in data
+  ddq_dq = data.ddq_dq # Derivatives of the FD w.r.t. the joint config vector
+  ddq_dv = data.ddq_dv # Derivatives of the FD w.r.t. the joint velocity vector
+  ddq_dtau = data.Minv # Derivatives of the FD w.r.t. the joint acceleration vector
+  
+  return ddq_dq, ddq_dv, ddq_dtau
 
 async def main():
-    transport = moteus_pi3hat.Pi3HatRouter(
-        servo_bus_map={
-            1: [1],  # Assuming controller ID 1 is on bus 1
-        }
+  transport = moteus_pi3hat.Pi3HatRouter(
+    servo_bus_map = {
+      1 : [1],
+    }
+  )
+
+  servos = {
+    servo_id : moteus.Controller(id=servo_id, transport=transport)
+    for servo_id in [1]
+  }
+
+  results = await transport.cycle([x.make_stop(query=True) for x in servos.values()])
+
+
+  print("Initial Values")
+  print(", ".join(
+     f"({result.arbitration_id}) " 
+      + f"({result.values[moteus.Register.POSITION]}) " 
+      + f"({result.values[moteus.Register.VELOCITY]})"  
+      + f"({result.values[moteus.Register.ACCELARATION]})"  
+      for result in results)
     )
-    c = moteus.Controller(id=1, transport=transport)
+  
+  positions = [result.values[moteus.Register.POSITION] for result in results] * 2 * math.pi
+  velocity = [result.values[moteus.Register.VELOCITY] for result in results]
+  accel = [result.values[moteus.Register.ACCELARATION] for result in results]
 
-    # Configure the position mode command
-    cmd = moteus.Controller.make_position(
-        position=math.nan,
-        velocity=0,
-        kp_scale=0,
-        kd_scale=0,
-        feedforward_torque=0,
-        query=True
+  print("\nStarting loop")
+  while True:
+    dp, dv, dtau = inverse_kinematic(positions, velocity, accel)
+
+    commands = [
+        servos[1].make_position(
+          feedforward_torque=dtau,
+          query=True)
+    ]
+
+    results = await transport.cycle(commands)
+
+
+    print(", ".join(
+     f"({result.arbitration_id}) " 
+      + f"({result.values[moteus.Register.POSITION]}) " 
+      + f"({result.values[moteus.Register.VELOCITY]})"  
+      + f"({result.values[moteus.Register.TORQUE]})"  
+      for result in results)
     )
+    positions = [result.values[moteus.Register.POSITION] for result in results]
 
-    missed_replies = 0
-    status_count = 0
-    STATUS_PERIOD = 100
+    await asyncio.sleep(0.02)
 
-    while True:
-        try:
-            result = await c.set_position(**cmd)
-            state = result.values
 
-            # Calculate gravity compensation torque
-            position = state.position
-            command_torque = math.sin(position * 2 * math.pi) * MASS_KG * LINK_LENGTH * GRAVITY
+  
+if __name__ == '__main__':
+  # You should change here to set up your own URDF file or just pass it as an argument of this example.
+  urdf_filename = '/models/robot.urdf' if len(argv)<2 else argv[1]
+  
+  # Load the urdf model
+  model = pin.buildModelFromUrdf(urdf_filename)
+  print('model name: ' + model.name)
+  
+  # Create data required by the algorithms
+  data = model.createData()
+  
+  # Set bounds (by default they are undefinded for a the Simple Humanoid model)
+  model.lowerPositionLimit = -np.ones((model.nq,1))
+  model.upperPositionLimit = np.ones((model.nq,1))
 
-            # Update the command
-            cmd['feedforward_torque'] = command_torque
-
-            # Reset missed replies counter
-            missed_replies = 0
-
-            # Print status periodically
-            status_count += 1
-            if status_count >= STATUS_PERIOD:
-                print(f"Mode: {state.mode:2d}  position: {position:6.3f}  "
-                      f"cmd_torque: {command_torque:6.3f}  temp: {state.temperature:4.1f}  ", 
-                      end='\r', flush=True)
-                status_count = 0
-
-        except moteus.CommandError:
-            missed_replies += 1
-            if missed_replies > 3:
-                print("\n\nMotor timeout!")
-                break
-
-        await asyncio.sleep(0.01)  # Similar to usleep(10000) in C++
-
-    print("Entering fault mode!")
-    while True:
-        await c.set_brake()
-        await asyncio.sleep(0.05)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+  q = pin.randomConfiguration(model) # joint configuration
+  v = np.random.rand(model.nv,1) # joint velocity
+  a = np.random.rand(model.nv,1) # joint acceleration
+  
+  asyncio.run(main())
