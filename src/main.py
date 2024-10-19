@@ -28,7 +28,7 @@ class Arm:
             )
         )
         
-        # For link2, we'll use a parameter that can be updated
+        # For link2, use a parameter that can be updated (assistance from exoskeleton)
         self.link2 = self.plant.AddRigidBody("link2", drake.SpatialInertia())
         self.end_mass_param = self.plant.AddParameter(
             drake.multibody.Parameter(1)  # 1-dimensional parameter
