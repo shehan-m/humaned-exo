@@ -95,88 +95,62 @@ class Arm:
         )
 
 async def main():
-    # We will be assuming a system where there are 4 servos, each
-    # attached to a separate pi3hat bus.  The servo_bus_map argument
-    # describes which IDs are found on which bus.
-    transport = moteus_pi3hat.Pi3HatRouter(
-        servo_bus_map = {
-            1:[1, 2] # ,
-            # 2:[22]
-        },
-    )
+    # Define parameters for the arm
+    m1 = 1.0  # mass of link 1 in kg
+    l1 = 0.5  # length of link 1 in meters
+    m2 = 0.8  # mass of link 2 in kg
+    l2 = 0.4  # length of link 2 in meters
+    assistance = 0.2  # initial end mass in kg
 
-    # We create one 'moteus.Controller' instance for each servo.  It
-    # is not strictly required to pass a 'transport' since we do not
-    # intend to use any 'set_*' methods, but it doesn't hurt.
-    #
-    # This syntax is a python "dictionary comprehension":
-    # https://docs.python.org/3/tutorial/datastructures.html#dictionaries
+    # Initialize the arm model
+    arm = Arm(m1, m2, l1, l2, assistance)
+
+    # Set up the transport and servos
+    transport = moteus_pi3hat.Pi3HatRouter(
+        servo_bus_map={1: [1, 2]},
+    )
     servos = {
-        servo_id : moteus.Controller(id=servo_id, transport=transport)
+        servo_id: moteus.Controller(id=servo_id, transport=transport)
         for servo_id in [1, 2]
     }
 
-    # We will start by sending a 'stop' to all servos, in the event
-    # that any had a fault.
+    # Send initial stop command to all servos
     await transport.cycle([x.make_stop() for x in servos.values()])
 
     while True:
-        # The 'cycle' method accepts a list of commands, each of which
-        # is created by calling one of the `make_foo` methods on
-        # Controller.  The most common thing will be the
-        # `make_position` method.
-
-        now = time.time()
-
-        # For now, we will just construct a position command for each
-        # of the 4 servos, each of which consists of a sinusoidal
-        # velocity command starting from wherever the servo was at to
-        # begin with.
-        #
-        # 'make_position' accepts optional keyword arguments that
-        # correspond to each of the available position mode registers
-        # in the moteus reference manual.
+        # Query the current state from servos
         commands = [
-            servos[1].make_position(
-                feedforward_torque=0,
-                position=math.nan,
-                velocity=0.1*math.sin(now),
-                query=True),
-            servos[2].make_position(
-                position=math.nan,
-                velocity=0.1*math.sin(now + 1),
-                query=True),
+            servos[1].make_position(query=True),
+            servos[2].make_position(query=True),
         ]
-
-        # By sending all commands to the transport in one go, the
-        # pi3hat can send out commands and retrieve responses
-        # simultaneously from all ports.  It can also pipeline
-        # commands and responses for multiple servos on the same bus.
         results = await transport.cycle(commands)
 
-        # The result is a list of 'moteus.Result' types, each of which
-        # identifies the servo it came from, and has a 'values' field
-        # that allows access to individual register results.
-        #
-        # Note: It is possible to not receive responses from all
-        # servos for which a query was requested.
-        #
-        # Here, we'll just print the ID, position, and velocity of
-        # each servo for which a reply was returned.
+        # Extract positions and velocities from the results
+        q = [results[0].values[moteus.Register.POSITION],
+             results[1].values[moteus.Register.POSITION]]
+        v = [results[0].values[moteus.Register.VELOCITY],
+             results[1].values[moteus.Register.VELOCITY]]
+        vd = [0, 0]  # zero acceleration
 
-        q = results.values[moteus.Register.POSITION]
-        v = moteus.Register.VELOCITY
-        vd = 0
+        # Calculate torques using inverse dynamics
+        tau = arm.calculate_inverse_dynamics(q, v, vd)
 
-        print(", ".join(
-            f"({result.arbitration_id} " +
-            f"{result.values[moteus.Register.POSITION]} " +
-            f"{result.values[moteus.Register.VELOCITY]})"
-            for result in results))
+        # Use the calculated torques as feedforward_torque for each motor
+        commands = [
+            servos[1].make_position(
+                feedforward_torque=tau[0],
+                query=True
+            ),
+            servos[2].make_position(
+                feedforward_torque=tau[1],
+                query=True
+            ),
+        ]
 
-        # We will wait 20ms between cycles.  By default, each servo
-        # has a watchdog timeout, where if no CAN command is received
-        # for 100ms the controller will enter a latched fault state.
+        # Send the commands and get responses
+        await transport.cycle(commands)
+
+        # Wait 20ms between cycles to prevent watchdog timeout
         await asyncio.sleep(0.02)
 
 if __name__ == '__main__':
