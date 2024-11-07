@@ -96,11 +96,11 @@ class Arm:
 
 async def main():
     # Define parameters for the arm
-    m1 = 1.0  # mass of link 1 in kg
-    l1 = 0.5  # length of link 1 in meters
-    m2 = 0.8  # mass of link 2 in kg
-    l2 = 0.4  # length of link 2 in meters
-    assistance = 0.2  # initial end mass in kg
+    m1 = 0.839  # mass of link 1 in kg
+    l1 = 0.265  # length of link 1 in meters
+    m2 = 0.203  # mass of link 2 in kg
+    l2 = 0.260 # length of link 2 in meters
+    assistance = 0.0  # initial end mass in kg
 
     # Initialize the arm model
     arm = Arm(m1, m2, l1, l2, assistance)
@@ -138,10 +138,14 @@ async def main():
         # Use the calculated torques as feedforward_torque for each motor
         commands = [
             servos[1].make_position(
+                kp_scale=0,
+                kd_scale=0,
                 feedforward_torque=tau[0],
                 query=True
             ),
             servos[2].make_position(
+                kp_scale=0,
+                kd_scale=0,
                 feedforward_torque=tau[1],
                 query=True
             ),
