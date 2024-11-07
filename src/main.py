@@ -3,168 +3,139 @@ import math
 import moteus
 import moteus_pi3hat
 import time
-
 import numpy as np
-import pydrake.all as drake
 
 class Arm:
     def __init__(self, m1, m2, l1, l2, initial_end_mass):
-        """Initialize the 2-DOF arm with initial parameters."""
-        self.m1 = m1
-        self.m2 = m2
-        self.l1 = l1
-        self.l2 = l2
+        """Initialise the 2-DOF arm with parameters."""
+        self.m1 = m1  # mass of link 1
+        self.m2 = m2  # mass of link 2
+        self.l1 = l1  # length of link 1
+        self.l2 = l2  # length of link 2
+        self.end_mass = initial_end_mass  # mass at end effector
         
-        # Create the multibody plant
-        self.plant = drake.multibody.plant.MultibodyPlant(time_step=0.0)
+        # Calculate center of mass distances
+        self.lc1 = l1/2  # COM of link 1
+        self.lc2 = l2/2  # COM of link 2
         
-        # Create links
-        self.link1 = self.plant.AddRigidBody(
-            "link1",
-            drake.SpatialInertia(
-                mass=m1,
-                p_PScm_E=np.array([l1/2, 0, 0]),
-                G_SP_E=drake.RotationalInertia(m1*l1**2/12, m1*l1**2/12, m1*l1**2/12)
-            )
-        )
-        
-        # For link2, use a parameter that can be updated (assistance from exoskeleton)
-        self.link2 = self.plant.AddRigidBody("link2", drake.SpatialInertia())
-        self.end_mass_param = self.plant.AddParameter(
-            drake.multibody.Parameter(1)  # 1-dimensional parameter
-        )
-        
-        # Add joints
-        self.shoulder = self.plant.AddRevoluteJoint(
-            "shoulder",
-            self.plant.world_frame(),
-            self.link1.body_frame(),
-            [0, 0, 1]
-        )
-        self.elbow = self.plant.AddRevoluteJoint(
-            "elbow",
-            self.link1.body_frame(),
-            self.link2.body_frame(),
-            [0, 0, 1]
-        )
-        
-        # Add gravity
-        self.plant.mutable_gravity_field().set_gravity_vector([0, -9.81, 0])
-        
-        # Finalize the plant
-        self.plant.Finalize()
-        
-        # Create a context for the plant
-        self.context = self.plant.CreateDefaultContext()
-        
-        # Set the initial end mass
-        self.set_end_mass(initial_end_mass)
+        self.g = 9.81  # gravity constant
 
     def set_end_mass(self, end_mass):
-        """Update the end mass and recalculate link2 properties."""
-        total_mass2 = self.m2 + end_mass
-        com2 = (self.m2 * self.l2/2 + end_mass * self.l2) / total_mass2
-        I2 = self.m2 * (self.l2/2)**2 + end_mass * self.l2**2  # Simple approximation
+        """Update the end mass."""
+        self.end_mass = end_mass
 
-        # Update the parameter value
-        self.plant.SetParameter(self.context, self.end_mass_param, [end_mass])
+    def calculate_dynamic_compensation(self, q_rotations, v_rotations):
+        """
+        Calculate compensation torques including gravity and velocity effects.
+        q_rotations: list of joint angles in rotations (arbitrary units)
+        v_rotations: list of joint velocities in rotations/time
+        Returns: list of torques [shoulder_torque, elbow_torque]
+        """
+        # Convert rotations to radians
+        q = [pos * 2 * np.pi for pos in q_rotations]  # convert to radians
+        v = [vel * 2 * np.pi for vel in v_rotations]  # convert to rad/time
+        q1, q2 = q
+        v1, v2 = v
         
-        # Update link2 spatial inertia
-        M2 = drake.SpatialInertia(
-            mass=total_mass2,
-            p_PScm_E=np.array([com2, 0, 0]),
-            G_SP_E=drake.RotationalInertia(I2, I2, I2)
-        )
-        self.plant.SetBodySpatialInertiaInBodyFrame(self.context, self.link2, M2)
-
-    def calculate_inverse_dynamics(self, q, v, vd):
-        """Calculate inverse dynamics using current end mass."""
-        # Set the state
-        self.plant.SetPositions(self.context, q)
-        self.plant.SetVelocities(self.context, v)
+        # Compute trigonometric terms
+        s1 = np.sin(q1)
+        s2 = np.sin(q2)
+        s12 = np.sin(q1 + q2)
+        c1 = np.cos(q1)
+        c2 = np.cos(q2)
+        c12 = np.cos(q1 + q2)
         
-        # Calculate inverse dynamics
-        return self.plant.CalcInverseDynamics(
-            self.context, vd, drake.multibody.plant.MultibodyForces(self.plant)
-        )
+        # Gravity compensation terms
+        tau1 = (self.m1 * self.g * self.lc1 * c1 +  # link 1 COM
+                self.m2 * self.g * (self.l1 * c1 +   # link 2 mass effect
+                                  self.lc2 * c12) +
+                self.end_mass * self.g * (self.l1 * c1 +  # end mass effect
+                                        self.l2 * c12))
+        
+        tau2 = ((self.m2 * self.lc2 + self.end_mass * self.l2) *
+                self.g * c12)
 
+        # Add Coriolis terms
+        h = self.m2 * self.l1 * self.lc2 * s2 + self.end_mass * self.l1 * self.l2 * s2
+        tau1 -= h * v2 * (v1 + v2)  # Subtract because opposing motion
+        tau2 += h * v1 * v1  # Add because assisting motion
+        
+        return [tau1, tau2]
+    
 async def main():
-    transport = moteus_pi3hat.Pi3HatRouter(
-        servo_bus_map = {
-        1 : [1],
-        }
-    )
+    # Define parameters for the arm
+    m1 = 0.839  # mass of link 1 in kg
+    l1 = 0.265  # length of link 1 in meters
+    m2 = 0.203  # mass of link 2 in kg
+    l2 = 0.260 # length of link 2 in meters
+    assistance = 0.0  # initial end mass in kg
 
+    # Initialize the arm model
+    arm = Arm(m1, m2, l1, l2, assistance)
+
+    # Set up the transport and servos
+    transport = moteus_pi3hat.Pi3HatRouter(
+        servo_bus_map={1: [1, 2]},
+    )
     servos = {
-        servo_id : moteus.Controller(id=servo_id, transport=transport)
-        for servo_id in [1]
+        servo_id: moteus.Controller(id=servo_id, transport=transport)
+        for servo_id in [1, 2]
     }
 
-    results = await transport.cycle([x.make_stop(query=True) for x in servos.values()])
+    # Send initial stop command to all servos
+    await transport.cycle([x.make_stop() for x in servos.values()])
 
-
-    print("Initial Values")
-    print(", ".join(
-        f"({result.arbitration_id}) " 
-        + f"({result.values[moteus.Register.POSITION]}) " 
-        + f"({result.values[moteus.Register.VELOCITY]})"  
-        + f"({result.values[moteus.Register.ACCELARATION]})"  
-        for result in results)
-        )
+    print("Starting dynamic compensation loop...")
     
-    positions = [result.values[moteus.Register.POSITION] for result in results] * 2 * math.pi
-    velocity = [result.values[moteus.Register.VELOCITY] for result in results]
-    accel = [result.values[moteus.Register.ACCELARATION] for result in results]
+    while True:
+        try:
+            # Query the current state from servos
+            commands = [
+                servos[1].make_position(query=True),
+                servos[2].make_position(query=True),
+            ]
+            results = await transport.cycle(commands)
 
-    print("\nStarting loop")
-    # while True:
-    #     dp, dv, dtau = inverse_kinematic(positions, velocity, accel)
+            # Extract positions and velocities from the results
+            q = [
+                results[0].values[moteus.Register.POSITION],
+                results[1].values[moteus.Register.POSITION]
+            ]
+            v = [
+                results[0].values[moteus.Register.VELOCITY],
+                results[1].values[moteus.Register.VELOCITY]
+            ]
+            # vd = [0, 0]  # zero acceleration
 
-    #     commands = [
-    #         servos[1].make_position(
-    #         feedforward_torque=dtau,
-    #         query=True)
-    #     ]
+            # Calculate torques using inverse dynamics
+            tau = arm.calculate_dynamic_compensation(q, v)
 
-    #     results = await transport.cycle(commands)
+            # Use the calculated torques as feedforward_torque for each motor
+            commands = [
+                servos[1].make_position(
+                    kp_scale=0,
+                    kd_scale=0,
+                    feedforward_torque=tau[0],
+                    query=True
+                ),
+                servos[2].make_position(
+                    kp_scale=0,
+                    kd_scale=0,
+                    feedforward_torque=tau[1],
+                    query=True
+                ),
+            ]
 
+            # Send the commands and get responses
+            await transport.cycle(commands)
 
-    #     print(", ".join(
-    #     f"({result.arbitration_id}) " 
-    #     + f"({result.values[moteus.Register.POSITION]}) " 
-    #     + f"({result.values[moteus.Register.VELOCITY]})"  
-    #     + f"({result.values[moteus.Register.TORQUE]})"  
-    #     for result in results)
-    #     )
-    #     positions = [result.values[moteus.Register.POSITION] for result in results]
+        except Exception as e:
+            print(f"Error in control loop: {e}")
+            await transport.cycle([x.make_stop() for x in servos.values()])
+            break
 
-    #     await asyncio.sleep(0.02)
+        # Wait 20ms between cycles to prevent watchdog timeout
+        await asyncio.sleep(0.02)
 
-
-# Main execution
-if __name__ == "__main__":
-    # Link 1
-    m1 = 0
-    l1 = 0
-
-
-    # Create the robot arm
-    arm = create_2dof_arm()
-    
-    # Create a context for the arm
-    context = arm.CreateDefaultContext()
-    
-    # Example joint positions, velocities, and accelerations
-    q = np.array([np.pi/4, np.pi/3])  # positions
-    v = np.array([0.1, 0.2])  # velocities
-    vd = np.array([0.05, 0.1])  # accelerations
-    
-    # Calculate inverse dynamics
-    tau = calculate_inverse_dynamics(arm, context, q, v, vd)
-    
-    print("Joint torques:", tau)
-    
-    # Gravity compensation (set velocities and accelerations to zero)
-    tau_gravity = calculate_inverse_dynamics(arm, context, q, np.zeros(2), np.zeros(2))
-    
-    print("Gravity compensation torques:", tau_gravity)
+if __name__ == '__main__':
+    asyncio.run(main())
