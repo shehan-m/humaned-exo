@@ -23,11 +23,15 @@ class ArmDynamics:
         Returns:
             tau: Joint torques accounting only for gravity
         """
+        # Convert rotations to radians
+        q_rad = np.array([pos * 2 * np.pi for pos in q])
+        v_rad = np.array([vel * 2 * np.pi for vel in v])
+
         # Zero acceleration for gravity compensation only
-        a = np.zeros_like(q)
+        a = np.zeros_like(q_rad)
 
         # Compute torques using RNEA for gravity compensation
-        tau_gravity = pin.rnea(self.model, self.data, q, v, a)
+        tau_gravity = pin.rnea(self.model, self.data, q_rad, v_rad, a)
         
         return tau_gravity
 
