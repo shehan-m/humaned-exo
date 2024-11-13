@@ -4,64 +4,51 @@ import moteus_pi3hat
 import numpy as np
 import pinocchio as pin
 from typing import List, Tuple
+import math
 
 class ArmDynamics:
     def __init__(self, m1, m2, l1, l2, com1, com2):
         """Initialize the 2-DOF planar arm with Pinocchio model."""
         self.model = self.build_model(m1, m2, l1, l2, com1, com2)
         self.data = self.model.createData()
-        
-        # Store frame ID for end-effector computations
-        self.ee_frame_id = self.model.getFrameId("end_effector")
 
     def build_model(self, m1, m2, l1, l2, com1, com2):
         """Build the 2-DOF planar arm model following the provided structure."""
         model = pin.Model()
         
         # Constants
-        kFudge = 0.95  # Safety factor for inertias
+        kFudge = 0.99  # Safety factor for inertias
         
         # Link transformations (from joint to COM)
-        Tlink1 = pin.SE3(pin.SE3.Matrix3.Identity(), np.array([com1, 0, 0]))  # CHANGE THIS TO ACTUAL
-        Tlink2 = pin.SE3(pin.SE3.Matrix3.Identity(), np.array([com2, 0, 0]))  # CHANGE THIS TO ACTUAL
+        Tlink1 = pin.SE3(pin.utils.eye(3), np.array([com1, 0, 0]))
+        Tlink2 = pin.SE3(pin.utils.eye(3), np.array([com2, 0, 0]))
         
         # Inertias (mass, COM position, rotational inertia)
         Ilink1 = pin.Inertia(
-            kFudge * m1,  # Mass with safety factor
+            kFudge * m1,
             Tlink1.translation,
-            pin.Inertia.Matrix3.Identity() * 0.001
+            pin.utils.eye(3) * 0.001
         )
         Ilink2 = pin.Inertia(
-            kFudge * m2,  # Mass with safety factor
+            kFudge * m2,
             Tlink2.translation,
-            pin.Inertia.Matrix3.Identity() * 0.001
+            pin.utils.eye(3) * 0.001
         )
-
-        # Improve the above section by adding correct rotational inertias:
-        # Ilink1 = pin.Inertia(
-        #     kFudge * m1,
-        #     Tlink1.translation,
-        #     pin.Inertia.Matrix3(
-        #         Ixx, 0, 0,
-        #         0, Iyy, 0,
-        #         0, 0, Izz
-        #     )
-        # )
         
         # Joint limits
-        qmin = np.array([-5.0])  # Position limits in radians
+        qmin = np.array([-5.0])
         qmax = np.array([5.0])
-        vmax = np.array([20])   # Velocity limits in rad/s
-        taumax = np.array([11]) # Torque limits in N⋅m
+        vmax = np.array([20])
+        taumax = np.array([11])
         
         # Add joints and bodies
-        idx = 0  # Start with root joint
+        idx = 0
         
         # Link 1
-        joint1_placement = pin.SE3(pin.SE3.Matrix3.Identity(), np.array([0, 0, 0]))
+        joint1_placement = pin.SE3(pin.utils.eye(3), np.array([0, 0, 0]))
         idx = model.addJoint(
             idx,
-            pin.JointModelRX(),  # Revolute joint around X (for planar motion in Y-Z plane)
+            pin.JointModelRX(),
             joint1_placement,
             "joint1",
             taumax,
@@ -69,14 +56,14 @@ class ArmDynamics:
             qmin,
             qmax
         )
-        model.appendBodyToJoint(idx, Ilink1)
+        model.appendBodyToJoint(idx, Ilink1, pin.SE3.Identity())
         model.addJointFrame(idx)
-        model.addBodyFrame("body1", idx)
+        model.addBodyFrame("body1", idx, pin.SE3.Identity(), -1)
         
         # Link 2
         joint2_placement = pin.SE3(
-            pin.SE3.Matrix3.Identity(),
-            np.array([l1, 0, 0])  # Full length of link 1
+            pin.utils.eye(3),
+            np.array([l1, 0, 0])
         )
         idx = model.addJoint(
             idx,
@@ -88,74 +75,38 @@ class ArmDynamics:
             qmin,
             qmax
         )
-        model.appendBodyToJoint(idx, Ilink2)
+        model.appendBodyToJoint(idx, Ilink2, pin.SE3.Identity())
         model.addJointFrame(idx)
-        model.addBodyFrame("body2", idx)
+        model.addBodyFrame("body2", idx, pin.SE3.Identity(), -1)
         
-        # Add end-effector frame
-        ee_placement = pin.SE3(
-            pin.SE3.Matrix3.Identity(),
-            np.array([l2, 0, 0])  # Full length of link 2
-        )
-        model.addFrame(
-            pin.Frame(
-                "end_effector",
-                idx,  # Attach to last joint
-                0,
-                ee_placement,
-                pin.FrameType.OP_FRAME
-            )
-        )
-
         return model
 
-    def compute_dynamics(
-        self, 
-        q: List[float],
-        v: List[float], 
-        end_wrench: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Compute inverse dynamics with variable end-effector wrench.
+    def compute_dynamics(self, q: List[float], v: List[float]) -> np.ndarray:
+        """Compute inverse dynamics without end-effector contribution.
         
         Args:
             q: Joint positions in rotations
             v: Joint velocities in rotations/s
-            end_wrench: 6D spatial force (force/torque) at end-effector [fx,fy,fz,tx,ty,tz]
         
         Returns:
-            tau: Joint torques accounting for gravity and end-effector wrench
+            tau: Joint torques accounting only for gravity
         """
         # Convert rotations to radians
         q_rad = np.array([pos * 2 * np.pi for pos in q])
         v_rad = np.array([vel * 2 * np.pi for vel in v])
         
-        # Zero acceleration (we only want gravity comp + external forces)
+        # Zero acceleration (we only want gravity compensation)
         a_rad = np.zeros_like(q_rad)
 
-        # Compute the dynamics using RNEA
+        # Compute the dynamics using RNEA for gravity compensation only
         tau_gravity = pin.rnea(self.model, self.data, q_rad, v_rad, a_rad)
         
-        # Get Jacobian at end-effector
-        pin.computeJointJacobians(self.model, self.data, q_rad)
-        J = pin.getFrameJacobian(
-            self.model,
-            self.data,
-            self.ee_frame_id,
-            pin.ReferenceFrame.LOCAL_WORLD_ALIGNED
-        )
-        
-        # Calculate joint torques from end-effector wrench: τ = J^T * h_e
-        tau_ee = J.T @ end_wrench
-        
-        # Total torque is gravity compensation plus end-effector contribution
-        tau_total = tau_gravity + tau_ee
-        
-        return tau_total
+        return tau_gravity
 
     
 async def main():
     # Starting offset from zero
-    offset = [0.05, 0.1] # TODO: Change this with actual
+    offset = [-0.0272064208984375, -0.057861328125]
 
     # Define parameters for the arm
     m1 = 0.839  # mass of link 1 in kg
@@ -164,7 +115,6 @@ async def main():
     l2 = 0.265  # length of link 2 in meters
     com1 = 0.225 # Centre of mass of link 1 in meters
     com2 = 0.130
-    end_mass = 0.0  # initial end mass in kg
 
     # Initialize the arm model
     arm = ArmDynamics(m1, m2, l1, l2, com1, com2)
@@ -194,40 +144,32 @@ async def main():
                 ]
                 results = await transport.cycle(commands)
 
-                # Add debug printing
                 print("\nRaw results from servos:")
                 for i, result in enumerate(results):
                     print(f"Servo {i+1} result: {result.values}")
 
                 # Safely extract positions and velocities with error checking
-                q = []
-                v = []
-                for result in results:
-                    if moteus.Register.POSITION not in result.values:
-                        raise ValueError(f"Position not found in servo results: {result.values}")
-                    if moteus.Register.VELOCITY not in result.values:
-                        raise ValueError(f"Velocity not found in servo results: {result.values}")
-                    
-                    q.append(result.values[moteus.Register.POSITION])
-                    v.append(result.values[moteus.Register.VELOCITY])
+                q = [results[0].values[moteus.Register.POSITION], results[1].values[moteus.Register.POSITION]]
+                v = [results[0].values[moteus.Register.VELOCITY], results[1].values[moteus.Register.VELOCITY]]
 
-                # End-effector force due to gravity
-                end_force = np.array([0, 0, -end_mass * 9.81, 0, 0, 0])
-
-                # Calculate torques using inverse dynamics
-                tau = arm.compute_dynamics(q, v, end_force)
+                # Calculate torques using inverse dynamics for gravity compensation
+                tau = arm.compute_dynamics(q, v)
 
                 # Use the calculated torques as feedforward_torque for each motor
                 commands = [
                     servos[1].make_position(
-                        kp_scale=0,
-                        kd_scale=0,
+                    	position=math.nan,
+                    	velocity=math.nan,
+                        kp_scale=0.0,
+                        kd_scale=0.0,
                         feedforward_torque=tau[0],
                         query=True
                     ),
                     servos[2].make_position(
-                        kp_scale=0,
-                        kd_scale=0,
+                    	position=math.nan,
+                    	velocity=math.nan,
+                        kp_scale=0.0,
+                        kd_scale=0.0,
                         feedforward_torque=tau[1],
                         query=True
                     ),
