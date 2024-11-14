@@ -11,7 +11,7 @@ class ArmDynamics:
         """Initialize the 2-DOF planar arm using a URDF file."""
         # Load the URDF model
         self.model = pin.buildModelFromUrdf(urdf_path)
-        self.model.gravity.linear = np.array([0, -9.81, 0])
+        # self.model.gravity.linear = np.array([0, -9.81, 0])
         self.data = self.model.createData()
 
     def compute_dynamics(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
@@ -92,7 +92,7 @@ async def main():
                         velocity=math.nan,
                         kp_scale=0.0,
                         kd_scale=0.0,
-                        feedforward_torque=tau[0],
+                        #feedforward_torque=tau[0],
                         query=True
                     ),
                     servos[2].make_position(
@@ -100,7 +100,7 @@ async def main():
                         velocity=math.nan,
                         kp_scale=0.0,
                         kd_scale=0.0,
-                        feedforward_torque=tau[1],
+                        #feedforward_torque=tau[1],
                         query=True
                     ),
                 ]
