@@ -1,40 +1,45 @@
 <?xml version="1.0"?>
 <robot name="two_dof_arm">
 
-    <!-- Link 1 -->
+    <!-- World Link (Fixed base, no mass) -->
+    <link name="world">
+        <!-- No inertial properties needed for a fixed base -->
+    </link>
+
+    <!-- Link 1 (Root link pivoting at origin) -->
     <link name="link1">
         <inertial>
-            <origin xyz="0.225 0 0" rpy="0 0 0" /> <!-- Center of mass -->
-            <mass value="0.839" />
-            <!-- inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0" /-->
+            <origin xyz="0.225 0 0" rpy="0 0 0"/>
+            <mass value="0.839"/>
+            <inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0"/>
         </inertial>
     </link>
 
     <!-- Link 2 -->
     <link name="link2">
         <inertial>
-            <origin xyz="0.130 0 0" rpy="0 0 0" /> <!-- Center of mass -->
-            <mass value="0.203" />
-            <!-- inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0" /-->
+            <origin xyz="0.130 0 0" rpy="0 0 0"/>
+            <mass value="0.203"/>
+            <inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0"/>
         </inertial>
     </link>
 
-    <!-- Joint 1: Revolute joint between base and link1 -->
+    <!-- Joint 1: Revolute joint between world (fixed base) and link1 -->
     <joint name="joint1" type="revolute">
-        <parent link="base_link" />
-        <child link="link1" />
-        <origin xyz="0 0 0" rpy="0 0 0" />
-        <axis xyz="1 0 0" />
-        <!-- limit effort="11" velocity="20" lower="-5.0" upper="5.0" /-->
+        <parent link="world"/> <!-- The fixed base -->
+        <child link="link1"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="11" velocity="20" lower="-1.57" upper="1.57"/>
     </joint>
 
     <!-- Joint 2: Revolute joint between link1 and link2 -->
     <joint name="joint2" type="revolute">
-        <parent link="link1" />
-        <child link="link2" />
-        <origin xyz="0.310 0 0" rpy="0 0 0" /> <!-- Positioned at the end of link1 -->
-        <axis xyz="1 0 0" />
-        <!-- limit effort="11" velocity="20" lower="-5.0" upper="5.0" /-->
+        <parent link="link1"/>
+        <child link="link2"/>
+        <origin xyz="0.45 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="11" velocity="20" lower="-1.57" upper="1.57"/>
     </joint>
 
 </robot>
