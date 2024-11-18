@@ -43,6 +43,8 @@ async def main():
     # Initialize the arm model
     arm = ArmDynamics(urdf_path)
 
+    offset = [0, 0]
+
     try:
         # Set up the transport and servos
         transport = moteus_pi3hat.Pi3HatRouter(
@@ -74,12 +76,12 @@ async def main():
 
                 # Extract positions and velocities
                 q = np.array([
-                    results[0].values[moteus.Register.POSITION] * 2 * np.pi,
-                    results[1].values[moteus.Register.POSITION] * 2 * np.pi
+                    results[0].values[moteus.Register.POSITION] - offset[0],
+                    results[1].values[moteus.Register.POSITION] - offset[1]
                 ])
                 v = np.array([
-                    results[0].values[moteus.Register.VELOCITY] * 2 * np.pi,
-                    results[1].values[moteus.Register.VELOCITY] * 2 * np.pi
+                    results[0].values[moteus.Register.VELOCITY],
+                    results[1].values[moteus.Register.VELOCITY]
                 ])
 
                 # Calculate torques using inverse dynamics for gravity compensation
@@ -89,7 +91,7 @@ async def main():
                 commands = [
                     servos[1].make_position(
                         position=math.nan,
-                        velocity=math.nan,
+                        #velocity=math.nan,
                         kp_scale=0.0,
                         kd_scale=0.0,
                         #feedforward_torque=tau[0],
@@ -97,7 +99,7 @@ async def main():
                     ),
                     servos[2].make_position(
                         position=math.nan,
-                        velocity=math.nan,
+                        #velocity=math.nan,
                         kp_scale=0.0,
                         kd_scale=0.0,
                         #feedforward_torque=tau[1],
