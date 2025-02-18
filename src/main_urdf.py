@@ -3,17 +3,18 @@ import moteus
 import moteus_pi3hat
 import numpy as np
 import pinocchio as pin
-from os.path import join, abspath, dirname, exists
+import os
 import math
 import logging
 import pickle
+import time  # for high-resolution loop timing
 
 class ArmDynamics:
     def __init__(self, urdf_path):
         """Initialise the 2-DOF planar arm using a URDF file."""
         # Cache the model to improve performance
         cache_path = urdf_path.replace(".urdf", ".pkl")
-        if exists(cache_path):
+        if os.path.exists(cache_path):
             with open(cache_path, 'rb') as f:
                 self.model = pickle.load(f)
         else:
@@ -49,11 +50,13 @@ async def main():
     )
 
     # Path to the URDF file
-    urdf_path = join(dirname(abspath(__file__)), "arm.urdf")
+    urdf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arm.urdf")
     
     # Initialize the arm model
     arm = ArmDynamics(urdf_path)
 
+    # Precomputed constant and offsets
+    TWO_PI = 2 * math.pi    
     offset = [0, 0]
 
     try:
@@ -67,37 +70,49 @@ async def main():
         }
 
         # Send initial stop command to all servos
-        await transport.cycle([x.make_stop() for x in servos.values()])
+        stop_commands = [servo.make_stop() for servo in servos.values()]
+        await transport.cycle(stop_commands)
         
         logging.info("Successfully initialized servos")
         logging.info("Starting dynamic compensation loop...")
-        
+
+        # Pre-allocate numpy arrays for positions and velocities
+        q = np.zeros(2)
+        v = np.zeros(2)
+
+        target_cycle_time = 0.02  # 20ms cycle time
+
+        # Main control loop
         while True:
+            loop_start = time.monotonic()
             try:
-                # Query the current state from servos
-                commands = [
+                # Query current state from servos with a reduced timeout (e.g., 300ms)
+                query_commands = [
                     servo.make_position(query=True) for servo in servos.values()
                 ]
-                results = await asyncio.wait_for(transport.cycle(commands), timeout=0.5)
-
-                #for i, result in enumerate(results):
-                #    print(f"Servo {i+1} result: {result.values}")
+                results = await asyncio.wait_for(transport.cycle(query_commands), timeout=0.3)
 
                 # Extract positions and velocities
-                q = np.array([
-                    (results[0].values[moteus.Register.POSITION] - offset[0]) * 2 * np.pi,
-                    (results[1].values[moteus.Register.POSITION] - offset[1]) * 2 * np.pi
-                ])
-                v = np.array([
-                    results[0].values[moteus.Register.VELOCITY] * 2 * np.pi,
-                    results[1].values[moteus.Register.VELOCITY] * 2 * np.pi
-                ])
+                try:
+                    pos0 = results[0].values[moteus.Register.POSITION]
+                    pos1 = results[1].values[moteus.Register.POSITION]
+                    vel0 = results[0].values[moteus.Register.VELOCITY]
+                    vel1 = results[1].values[moteus.Register.VELOCITY]
+                except KeyError as e:
+                    logging.error(f"KeyError accessing motor data: {e}. Results: {results}")
+                    continue  # Skip this cycle and try again
+
+                # Update joint positions/velocities (using preallocated arrays)
+                q[0] = (pos0 - offset[0]) * TWO_PI
+                q[1] = (pos1 - offset[1]) * TWO_PI
+                v[0] = vel0 * TWO_PI
+                v[1] = vel1 * TWO_PI
 
                 # Calculate torques using inverse dynamics for gravity compensation
                 tau = arm.compute_dynamics(q, v)
 
                 # Use the calculated torques as feedforward torque for each motor
-                commands = [
+                torque_commands = [
                     servos[1].make_position(
                         position=math.nan,
                         velocity=math.nan,
@@ -117,7 +132,7 @@ async def main():
                 ]
 
                 # Send the commands and get responses
-                await transport.cycle(commands)
+                await transport.cycle(torque_commands)
 
             except asyncio.TimeoutError:
                 logging.error("Transport cycle timed out.")
@@ -130,8 +145,13 @@ async def main():
                 logging.error(f"Unexpected error in control loop: {type(e).__name__}: {e}")
                 break
 
-            # Wait 20ms between cycles to prevent watchdog timeout
-            await asyncio.sleep(0.02)
+            # Calculate loop duration and adjust sleep to maintain a consistent 20ms cycle
+            elapsed = time.monotonic() - loop_start
+            sleep_time = target_cycle_time - elapsed
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            else:
+                logging.warning(f"Loop overran expected cycle time by {-sleep_time:.4f} seconds.")
 
     except Exception as e:
         logging.error(f"Error during initialization: {type(e).__name__}: {e}")
