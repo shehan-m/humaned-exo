@@ -7,12 +7,11 @@ import os
 import math
 import logging
 import pickle
-import time  # for high-resolution loop timing
+import time
 
 class ArmDynamics:
     def __init__(self, urdf_path):
-        """Initialise the 2-DOF planar arm using a URDF file."""
-        # Cache the model to improve performance
+        """Initialize the 2-DOF planar arm using a URDF file."""
         cache_path = urdf_path.replace(".urdf", ".pkl")
         if os.path.exists(cache_path):
             with open(cache_path, 'rb') as f:
@@ -23,11 +22,16 @@ class ArmDynamics:
                 pickle.dump(self.model, f)
 
         self.data = self.model.createData()
-
-        # Preallocate zero acceleration vector
         self.zero_acc = np.zeros(2)
 
-    def compute_dynamics(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
+        # Identify end-effector joint
+        self.end_effector_id = self.model.njoints - 1
+
+        # Preallocate external force vector (initialize with zeros)
+        self.fext = pin.StdVec_Force()
+        self.fext.extend([pin.Force.Zero() for _ in range(self.model.njoints)])
+
+    def compute_dynamics(self, q: np.ndarray, v: np.ndarray, mass: float) -> np.ndarray:
         """Compute joint torques for gravity compensation using URDF model.
         
         Args:
@@ -37,9 +41,33 @@ class ArmDynamics:
         Returns:
             tau: Joint torques accounting only for gravity
         """
+        
+        # Compute forward kinematics to get joint transforms
+        pin.forwardKinematics(self.model, self.data, q, v, self.zero_acc)
+        
+        # Only update the transform of the end-effector (not all joints)
+        pin.updateFramePlacement(self.model, self.data, self.end_effector_id)
 
-        # Compute torques using RNEA for gravity compensation
-        tau_gravity = pin.rnea(self.model, self.data, q, v, self.zero_acc)
+        # Extract end-effector transform
+        ee_placement = self.data.oMi[self.end_effector_id]
+
+        # Gravity force in world frame
+        gravity_vector_world = np.array([0, -9.81 * mass, 0])
+
+        # Transform force to local frame using matrix components
+        R = ee_placement.rotation.T  # Transpose of rotation matrix
+        gravity_vector_local = np.array([
+            R[0, 0] * gravity_vector_world[0] + R[0, 1] * gravity_vector_world[1] + R[0, 2] * gravity_vector_world[2],
+            R[1, 0] * gravity_vector_world[0] + R[1, 1] * gravity_vector_world[1] + R[1, 2] * gravity_vector_world[2],
+            R[2, 0] * gravity_vector_world[0] + R[2, 1] * gravity_vector_world[1] + R[2, 2] * gravity_vector_world[2]
+        ])  # Faster than `@` matrix multiply
+
+        # Update only the end-effector joint in fext (reuse memory)
+        self.fext[self.end_effector_id].linear = gravity_vector_local
+        self.fext[self.end_effector_id].angular = np.zeros(3)
+
+        # Compute torques with external forces
+        tau_gravity = pin.rnea(self.model, self.data, q, v, self.zero_acc, self.fext)
         
         return tau_gravity
 

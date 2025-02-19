@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<robot name="two_dof_arm">
+
+    <!-- World Link (Fixed base, no mass) -->
+    <!-- This was the reason we got invalid URDF model errors. We need to have a base link-->
+    <link name="world">
+        <!-- No inertial properties needed for a fixed base -->
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.1 0.1 0.1"/>
+            </geometry>
+            <material name="gray">
+                <color rgba="0.5 0.5 0.5 1.0"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- Link 1 (Root link pivoting at origin) -->
+    <link name="link1">
+        <inertial>
+            <origin xyz="0 0 -0.225" rpy="0 0 0"/>
+            <mass value="0.839"/>
+            <inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 -0.16" rpy="0 0 1.57"/>
+            <geometry>
+                <cylinder radius="0.05" length="0.32"/>
+            </geometry>
+            <material name="blue">
+                <color rgba="0.0 0.0 1.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- Link 2 -->
+    <link name="link2">
+        <inertial>
+            <origin xyz="0 0 -0.130" rpy="0 0 0"/>
+            <mass value="0.203"/>
+            <inertia ixx="0.001" iyy="0.001" izz="0.001" ixy="0" ixz="0" iyz="0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 -0.13" rpy="0 0 1.57"/>
+            <geometry>
+                <cylinder radius="0.05" length="0.26"/>
+            </geometry>
+            <material name="green">
+                <color rgba="0.0 1.0 0.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- Joint 1: Revolute joint between world (fixed base) and link1 -->
+    <joint name="joint1" type="revolute">
+        <parent link="world"/>
+        <child link="link1"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit effort="8" velocity="20" lower="-1.57" upper="1.57"/>
+    </joint>
+
+    <!-- Joint 2: Revolute joint between link1 and link2 -->
+    <joint name="joint2" type="revolute">
+        <parent link="link1"/>
+        <child link="link2"/>
+        <origin xyz="0 0 -0.32" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit effort="8" velocity="20" lower="-1.57" upper="1.57"/>
+    </joint>
+
+</robot>
